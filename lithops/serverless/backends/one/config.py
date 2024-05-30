@@ -72,7 +72,7 @@ DEFAULT_CONFIG_KEYS = {
     'public_vnet_id': -1,
     'private_vnet_id': -1,
     'oneke_config': DEFAULT_ONEKE_CONFIG,    
-    #TODO: Add kube.config file 
+    # TODO: Add kube.config file 
 }
 
 FH_ZIP_LOCATION = os.path.join(os.getcwd(), 'lithops_one.zip')
