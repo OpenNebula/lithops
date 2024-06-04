@@ -1,17 +1,16 @@
 import os
 import json
 
+
 from lithops.serverless.backends.k8s.config import (
-    DEFAULT_CONFIG_KEYS,
-    DEFAULT_GROUP,
-    DEFAULT_VERSION,
-    MASTER_NAME,
-    MASTER_PORT,
     DOCKERFILE_DEFAULT,
-    JOB_DEFAULT,
-    POD,
     load_config as original_load_config
 )
+
+
+class OneConfigError(Exception):
+    pass
+
 
 DEFAULT_ONEKE_CONFIG = """
 {
@@ -61,6 +60,13 @@ DEFAULT_ONEKE_CONFIG = """
 }
 """
 
+
+MANDATORY_CONFIG_KEYS = {
+    "public_network_id",
+    "private_network_id"
+}
+
+
 DEFAULT_PRIVATE_VNET = """
 NAME    = "private-oneke"
 VN_MAD  = "bridge"
@@ -68,14 +74,9 @@ AUTOMATIC_VLAN_ID = "YES"
 AR = [TYPE = "IP4", IP = "192.168.150.0", SIZE = "51"]
 """
 
-DEFAULT_CONFIG_KEYS = {
-    'public_vnet_id': -1,
-    'private_vnet_id': -1,
-    'oneke_config': DEFAULT_ONEKE_CONFIG,    
-    # TODO: Add kube.config file 
-}
 
 FH_ZIP_LOCATION = os.path.join(os.getcwd(), 'lithops_one.zip')
+
 
 # Overwrite default Dockerfile
 DOCKERFILE_DEFAULT = "\n".join(DOCKERFILE_DEFAULT.split('\n')[:-2]) + """
@@ -83,11 +84,31 @@ COPY lithops_one.zip .
 RUN unzip lithops_one.zip && rm lithops_one.zip
 """
 
+
 def load_config(config_data):
-    if 'oneke_config' in config_data:
-        try:
-            with open(config_data['oneke_config'], 'r') as f:
-                config_data['oneke_config'] = json.load(f)
-        except (IOError, json.JSONDecodeError) as err:
-            raise Exception(f"Error reading OneKE config file: {err}")
+    if 'oneke_config' in config_data['one']:
+        oneke_config = config_data['one']['oneke_config']
+        
+        # Validate mandatory params
+        for key in MANDATORY_CONFIG_KEYS:
+            if key not in oneke_config:
+                raise OneConfigError(f"'{key}' is missing in 'oneke_config'")
+        public_network_id = oneke_config['public_network_id']
+        private_network_id = oneke_config['private_network_id']
+     
+        # Optional params: name
+        name = oneke_config.get('name', 'OneKE for lithops')
+
+        oneke_update = {
+            "name": name,
+            "networks_values": [
+                {"Public": {"id": str(public_network_id)}},
+                {"Private": {"id": str(private_network_id)}}
+            ]
+        }
+
+        # Override oneke_config with valid JSON to update the service
+        config_data['one']['oneke_config'] = json.dumps(oneke_update)
+
+    # Load k8s default config
     original_load_config(config_data)

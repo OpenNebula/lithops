@@ -1,9 +1,11 @@
 lithops:
-  backend: k8s
+  backend: one
 one:
-  # PATH to OneKE JSON config
+  service_id: # oneke service id (means OneKE is already deployed)
+  service_template_id: # oneke_tempalte_id (client has downloaded before)
+  oneconfig_path: # PATH to OneKE JSON config
+  
   oneke_config:
-  # ID for Public vnet (if not passed: service default network or create a new one)
-  public_vnet_id:
-  # ID for Private vnet (if not passed: create a new one)
-  private_vnet_id:
+    public_vnet_id: # ID for Public vnet
+    private_vnet_id: # ID for Private vnet (if not passed: create a new one)
+  delete: # if set to True, OneKE VMs will be deleted after all the jobs are finished
