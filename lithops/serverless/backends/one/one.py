@@ -1,12 +1,35 @@
 from ..k8s.k8s import KubernetesBackend
 
+import logging
+import urllib3
+import oneflow
+
+logger = logging.getLogger(__name__)
+urllib3.disable_warnings()
+
+
+class OneError(Exception):
+    pass
+
+
 class OpenNebula(KubernetesBackend):
     """
     A wrap-up around OpenNebula backend.
     """
     def __init__(self, one_config, internal_storage):
-        # TODO: check One_KE is deployed
-        #       (if not) initialize OpenNebula One_KE & wait for it to be ready
+        logger.debug("Initializing OpenNebula backend")
+        self.client = oneflow.OneFlowClient()
+
+        # template_id: instantiate OneKE
+        if 'template_id' in one_config:
+            service_id = self._instantiate_oneke(one_config['template_id'], one_config['oneke_config'])
+            self._wait_for_oneke(service_id)
+        # service_id: check deployed OneKE is available
+        elif 'service_id' in one_config:
+            self._check_oneke(one_config['service_id'])
+        else:
+            raise OneError(f"OpenNebula backend must contain 'template_id' or 'service_id'")
+        
 
         # Overwrite config values
         self.name = 'one'
@@ -27,22 +50,21 @@ class OpenNebula(KubernetesBackend):
         pass
 
 
-    def _check_oneke(self):
+    def _check_oneke(self, service_id):
         # CASE1: client has created their own OneKE cluster
         # CASE2: OneKE cluster was created by lithops (with or without JSON file) 
         pass
     
 
-    def _instantiate_oneke(self):
-        # TODO: check OneKE JSON is passed (if not use default)
-        
-        # TODO: check networks (public/private vnets)
-        
-        # TODO: instantiate OneKE
+    def _instantiate_oneke(self, template_id, oneke_config):
+        # TODO: create private network if not passed
+        _json = self.client.templatepool[template_id].instantiate(oneke_config)
+        logger.info("JSON: {}".format(_json))
+        # Get service_id from JSON
         pass
 
 
-    def _wait_for_oneke(self):
+    def _wait_for_oneke(self, service_id):
         # TODO: wait for all the VMs
         
         # TODO: look onegate connectivity
