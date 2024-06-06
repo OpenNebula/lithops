@@ -1,10 +1,12 @@
 from ..k8s.k8s import KubernetesBackend
 
+import oneflow
+import pyone
+
 import os
 import json
 import logging
 import urllib3
-import oneflow
 
 logger = logging.getLogger(__name__)
 urllib3.disable_warnings()
@@ -13,6 +15,22 @@ urllib3.disable_warnings()
 class OneError(Exception):
     pass
 
+def _config_one():  
+    env = os.environ
+
+    # Reading the `one_auth` file.
+    # The `one_auth` file path is given in the environment variable
+    # `ONE_AUTH` if exists, otherwise it is in `$HOME/.one/one_auth`.
+    auth_path = env.get('ONE_AUTH') or os.path.expanduser('~/.one/one_auth')
+    with open(auth_path, mode='r') as auth_file:
+        credentials = auth_file.readlines()[0].strip()
+
+    # Reading environment variables.
+    # Environment variable `ONESERVER_URL` superseeds the default URL.
+    url = env.get('ONESERVER_URL', 'http://localhost:2633/RPC2')
+
+    return pyone.OneServer(url, session=credentials)    
+
 
 class OpenNebula(KubernetesBackend):
     """
@@ -20,11 +38,15 @@ class OpenNebula(KubernetesBackend):
     """
     def __init__(self, one_config, internal_storage):
         logger.debug("Initializing OpenNebula backend")
+
+        logger.debug("Initializing Oneflow python client")
         self.client = oneflow.OneFlowClient()
+
+        logger.debug("Initializing OpenNebula python client")
+        self.one = _config_one()
 
         # template_id: instantiate OneKE
         if 'template_id' in one_config:
-            logger.info(one_config['template_id'])
             service_id = self._instantiate_oneke(one_config['template_id'], one_config['oneke_config'])
             self._wait_for_oneke(service_id)
         # service_id: check deployed OneKE is available
@@ -68,12 +90,24 @@ class OpenNebula(KubernetesBackend):
 
         # Get service_id from JSON
         service_id = list(_json.keys())[0]
-        logger.info("OneKE service ID: {}".format(service_id))
+        logger.debug("OneKE service ID: {}".format(service_id))
         return service_id
 
 
     def _wait_for_oneke(self, service_id):
-        # TODO: wait for all the VMs
+        _service_json = self.client.servicepool[service_id].info()
+        logger.debug(_service_json)
+        logs = _service_json[service_id]['TEMPLATE']['BODY'].get('log', [])
+        if logs:
+            last_log = logs[-1]
+            logger.debug(last_log)
+            state = last_log['message'].split(':')[-1].strip()
+            if state == 'FAILED_DEPLOYING':
+                raise OneError(f"OneKE deployment has failed")
+            if state == 'RUNNING':
+                logger.info("OneKE is Running")
+            logger.debug("Deployment state: {}".format(state))
+
         
         # TODO: look onegate connectivity
         pass
