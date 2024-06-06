@@ -5,6 +5,7 @@ import pyone
 
 import os
 import json
+import time
 import logging
 import urllib3
 
@@ -94,20 +95,27 @@ class OpenNebula(KubernetesBackend):
         return service_id
 
 
-    def _wait_for_oneke(self, service_id):
-        _service_json = self.client.servicepool[service_id].info()
-        logger.debug(_service_json)
-        logs = _service_json[service_id]['TEMPLATE']['BODY'].get('log', [])
-        if logs:
-            last_log = logs[-1]
-            logger.debug(last_log)
-            state = last_log['message'].split(':')[-1].strip()
-            if state == 'FAILED_DEPLOYING':
-                raise OneError(f"OneKE deployment has failed")
-            if state == 'RUNNING':
-                logger.info("OneKE is Running")
-            logger.debug("Deployment state: {}".format(state))
-
-        
-        # TODO: look onegate connectivity
-        pass
+    def _wait_for_oneke(self, service_id, timeout=600):
+        start_time = time.time()
+        minutes_timeout = int(timeout/60)
+        logger.debug("Initializing OneKE service. Be patient, this process can take up to {} minutes".format(minutes_timeout))
+        while True:
+            _service_json = self.client.servicepool[service_id].info()
+            logs = _service_json[service_id]['TEMPLATE']['BODY'].get('log', [])
+            if logs:
+                last_log = logs[-1]
+                logger.debug(last_log)
+                state = last_log['message'].split(':')[-1].strip()
+                # Check OneKE deployment status
+                if state == 'FAILED_DEPLOYING':
+                    raise OneError("OneKE deployment has failed")
+                if state == 'RUNNING':
+                    logger.debug("OneKE is running")
+                    break
+            
+            # Check timeout
+            elapsed_time = time.time() - start_time
+            if elapsed_time > timeout:
+                raise OneError("Deployment timed out after {} seconds. You can try again once OneKE is in RUNNING state with the service_id option.".format(timeout))
+            
+            time.sleep(10)
