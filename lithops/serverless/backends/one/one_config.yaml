@@ -6,6 +6,6 @@ one:
   oneconfig_path: # PATH to OneKE JSON config
   
   oneke_config:
-    public_vnet_id: # ID for Public vnet
-    private_vnet_id: # ID for Private vnet (if not passed: create a new one)
+    public_network_id: # ID for Public vnet
+    private_network_id: # ID for Private vnet (if not passed: create a new one)
   delete: # if set to True, OneKE VMs will be deleted after all the jobs are finished

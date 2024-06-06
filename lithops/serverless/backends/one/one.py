@@ -1,5 +1,7 @@
 from ..k8s.k8s import KubernetesBackend
 
+import os
+import json
 import logging
 import urllib3
 import oneflow
@@ -22,6 +24,7 @@ class OpenNebula(KubernetesBackend):
 
         # template_id: instantiate OneKE
         if 'template_id' in one_config:
+            logger.info(one_config['template_id'])
             service_id = self._instantiate_oneke(one_config['template_id'], one_config['oneke_config'])
             self._wait_for_oneke(service_id)
         # service_id: check deployed OneKE is available
@@ -58,9 +61,22 @@ class OpenNebula(KubernetesBackend):
 
     def _instantiate_oneke(self, template_id, oneke_config):
         # TODO: create private network if not passed
-        _json = self.client.templatepool[template_id].instantiate(oneke_config)
-        logger.info("JSON: {}".format(_json))
+        logger.info(oneke_config)
+        
+        #tmp_file_path = '/tmp/oneke_config.json'
+        #with open(tmp_file_path, 'w') as f:
+            #json.dump(oneke_config, f)
+
+        # Pass the temporary file path to the update() function
+        _json = self.client.templatepool[template_id].instantiate(json_str=oneke_config)
+
+        # Remove the temporary file after use
+        #os.remove(tmp_file_path)
+        
+
         # Get service_id from JSON
+        logger.info("JSON: {}".format(_json))
+
         pass
 
 
