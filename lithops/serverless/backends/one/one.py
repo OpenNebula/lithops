@@ -61,23 +61,15 @@ class OpenNebula(KubernetesBackend):
 
     def _instantiate_oneke(self, template_id, oneke_config):
         # TODO: create private network if not passed
-        logger.info(oneke_config)
-        
-        #tmp_file_path = '/tmp/oneke_config.json'
-        #with open(tmp_file_path, 'w') as f:
-            #json.dump(oneke_config, f)
 
         # Pass the temporary file path to the update() function
-        _json = self.client.templatepool[template_id].instantiate(json_str=oneke_config)
-
-        # Remove the temporary file after use
-        #os.remove(tmp_file_path)
-        
+        oneke_json = json.loads(oneke_config)
+        _json = self.client.templatepool[template_id].instantiate(json_str=oneke_json)
 
         # Get service_id from JSON
-        logger.info("JSON: {}".format(_json))
-
-        pass
+        service_id = list(_json.keys())[0]
+        logger.info("OneKE service ID: {}".format(service_id))
+        return service_id
 
 
     def _wait_for_oneke(self, service_id):
