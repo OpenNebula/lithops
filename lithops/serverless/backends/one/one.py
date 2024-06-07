@@ -89,7 +89,7 @@ class OpenNebula(KubernetesBackend):
         logger.debug("Checking OpenNebula OneKE service status")
         # Check service status
         _service_json = self.client.servicepool[service_id].info()
-        last_log = _service_json[str(service_id)service_id]['TEMPLATE']['BODY'].get('log', [])[-1]
+        last_log = _service_json[str(service_id)]['TEMPLATE']['BODY'].get('log', [])[-1]
         state = last_log['message'].split(':')[-1].strip()
         if state != 'RUNNING':
             raise OneError(f"OpenNebula OneKE service is not running: {state}")
