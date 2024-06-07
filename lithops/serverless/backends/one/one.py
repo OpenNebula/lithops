@@ -47,7 +47,7 @@ class OpenNebula(KubernetesBackend):
         logger.debug("Initializing OpenNebula python client")
         self.one = _config_one()
 
-        # template_id: instantiate OneKE
+        # template_id: instantiate master node
         if 'template_id' in one_config:
             one_config['service_id'] = self._instantiate_oneke(one_config['template_id'], one_config['oneke_config'])
             self._wait_for_oneke(one_config['service_id'],  one_config['timeout'])
@@ -59,13 +59,13 @@ class OpenNebula(KubernetesBackend):
         
         # Get and Save kubeconfig from OneKE
         kubecfg = self._get_kube_config(one_config['service_id'])
-        with open(one_config['oneconfig_path'], 'w') as file:
+        with open(one_config['kubecfg_path'], 'w') as file:
             file.write(kubecfg)
 
         # Overwrite config values
         self.name = 'one'
-        self.kubecfg_path = one_config['oneconfig_path']
-        
+        self.kubecfg_path = one_config['kubecfg_path']
+
         super().__init__(one_config, internal_storage)
     
 
@@ -91,7 +91,7 @@ class OpenNebula(KubernetesBackend):
     def _instantiate_oneke(self, template_id, oneke_config):
         # TODO: create private network if not passed
 
-        # Pass the temporary file path to the update() function
+        # Instantiate OneKE
         oneke_json = json.loads(oneke_config)
         _json = self.client.templatepool[template_id].instantiate(json_str=oneke_json)
 

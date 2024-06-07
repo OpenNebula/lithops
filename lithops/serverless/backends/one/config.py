@@ -72,10 +72,10 @@ RUN unzip lithops_one.zip && rm lithops_one.zip
 
 
 # Add OpenNebula defaults
-DEFAULT_CONFIG_KEYS = {
+DEFAULT_CONFIG_KEYS.update({
     'timeout': 600,
-    'kubcfg_path': '/tmp/kube_config'
-}
+    'kubecfg_path': '/tmp/kube_config',
+})
 
 
 def load_config(config_data):
