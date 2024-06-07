@@ -1,4 +1,5 @@
 from ..k8s.k8s import KubernetesBackend
+from .config import STATE, LCM_STATE
 
 import oneflow
 import pyone
@@ -49,14 +50,16 @@ class OpenNebula(KubernetesBackend):
 
         # template_id: instantiate master node
         if 'template_id' in one_config:
-            one_config['service_id'] = self._instantiate_oneke(one_config['template_id'], one_config['oneke_config'])
-            self._wait_for_oneke(one_config['service_id'],  one_config['timeout'])
-        # service_id: check deployed OneKE is available
+            one_config['service_id'] = self._instantiate_oneke(one_config['template_id'], one_config['oneke_config'], one_config['oneke_config_path'])
+            self._wait_for_oneke(one_config['service_id'], one_config['timeout'])
         elif 'service_id' in one_config:
-            self._check_oneke(one_config['service_id'])
+            pass
         else:
-            raise OneError(f"OpenNebula backend must contain 'template_id' or 'service_id'")
-        
+            raise OneError("OpenNebula backend must contain 'template_id' or 'service_id'")
+
+        # Check OneKE status
+        self._check_oneke(one_config['service_id'])
+
         # Get and Save kubeconfig from OneKE
         kubecfg = self._get_kube_config(one_config['service_id'])
         with open(one_config['kubecfg_path'], 'w') as file:
@@ -75,25 +78,48 @@ class OpenNebula(KubernetesBackend):
     
     def clear(self, job_keys=None):
         # First, we clean Kubernetes jobs
-        super().clear(all)
+        super().clear(job_keys)
 
         # TODO: if all are deteleted -> suspend OneKE VMs (scale down) and
         #       delete them after X minutes
         pass
-
+    
 
     def _check_oneke(self, service_id):
-        # CASE1: client has created their own OneKE cluster
-        # CASE2: OneKE cluster was created by lithops (with or without JSON file) 
+        logger.debug("Checking OpenNebula OneKE service status")
+        # Check service status
+        _service_json = self.client.servicepool[service_id].info()
+        last_log = _service_json[str(service_id)service_id]['TEMPLATE']['BODY'].get('log', [])[-1]
+        state = last_log['message'].split(':')[-1].strip()
+        if state != 'RUNNING':
+            raise OneError(f"OpenNebula OneKE service is not running: {state}")
+        # Check VMs status
+        vm_ids = {
+            node['vm_info']['VM']['ID']
+            for role in _service_json[str(service_id)]['TEMPLATE']['BODY']['roles']
+            for node in role['nodes']
+        }
+        for vm_id in vm_ids:
+            vm = self.one.vm.info(int(vm_id))
+            state = vm.STATE
+            lcm_state = vm.LCM_STATE
+            if state != 3 or lcm_state != 3:
+                state_desc = STATE.get(state, "UNKNOWN_STATE")
+                lcm_state_desc = LCM_STATE.get(lcm_state, "UNKNOWN_LCM_STATE")
+                raise OneError(f"VM {vm_id} fails validation: STATE={state_desc} (code {state}), LCM_STATE={lcm_state_desc} (code {lcm_state})")
         pass
     
 
-    def _instantiate_oneke(self, template_id, oneke_config):
+    def _instantiate_oneke(self, template_id, oneke_config, oneke_config_path):
         # TODO: create private network if not passed
 
-        # Instantiate OneKE
-        oneke_json = json.loads(oneke_config)
-        _json = self.client.templatepool[template_id].instantiate(json_str=oneke_json)
+        # Instantiate OneKE (with JSON or oneke_config parameters)
+        logger.debug("Instantiating OpenNebula OneKE service")
+        if oneke_config_path is not None: 
+            _json = self.client.templatepool[template_id].instantiate(path=oneke_config_path)
+        else:  
+            oneke_json = json.loads(oneke_config)
+            _json = self.client.templatepool[template_id].instantiate(json_str=oneke_json)
 
         # Get service_id from JSON
         service_id = list(_json.keys())[0]
@@ -107,7 +133,7 @@ class OpenNebula(KubernetesBackend):
         logger.debug("Initializing OneKE service. Be patient, this process can take up to {} minutes".format(minutes_timeout))
         while True:
             _service_json = self.client.servicepool[service_id].info()
-            logs = _service_json[service_id]['TEMPLATE']['BODY'].get('log', [])
+            logs = _service_json[str(service_id)]['TEMPLATE']['BODY'].get('log', [])
             if logs:
                 last_log = logs[-1]
                 logger.debug("Last log: {}".format(last_log))
@@ -125,6 +151,7 @@ class OpenNebula(KubernetesBackend):
                 raise OneError("Deployment timed out after {} seconds. You can try again once OneKE is in RUNNING state with the service_id option.".format(timeout))
             
             time.sleep(10)
+        logger.debug("OneKE service is running after {} seconds".format(int(elapsed_time)))
 
 
     def _get_kube_config(self, service_id):
@@ -141,5 +168,5 @@ class OpenNebula(KubernetesBackend):
         vm = self.one.vm.info(int(master_vm_id))
         encoded_kubeconfig = vm.USER_TEMPLATE.get('ONEKE_KUBECONFIG')
         decoded_kubeconfig = base64.b64decode(encoded_kubeconfig).decode('utf-8')
-        logger.debug("OpneNebula OneKE Kubeconfig: {}".format(decoded_kubeconfig))
+        logger.debug("OpenNebula OneKE Kubeconfig: {}".format(decoded_kubeconfig))
         return decoded_kubeconfig
