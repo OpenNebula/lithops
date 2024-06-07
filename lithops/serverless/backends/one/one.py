@@ -6,6 +6,7 @@ import pyone
 import os
 import json
 import time
+import base64
 import logging
 import urllib3
 
@@ -48,18 +49,23 @@ class OpenNebula(KubernetesBackend):
 
         # template_id: instantiate OneKE
         if 'template_id' in one_config:
-            service_id = self._instantiate_oneke(one_config['template_id'], one_config['oneke_config'])
-            self._wait_for_oneke(service_id)
+            one_config['service_id'] = self._instantiate_oneke(one_config['template_id'], one_config['oneke_config'])
+            self._wait_for_oneke(one_config['service_id'],  one_config['timeout'])
         # service_id: check deployed OneKE is available
         elif 'service_id' in one_config:
             self._check_oneke(one_config['service_id'])
         else:
             raise OneError(f"OpenNebula backend must contain 'template_id' or 'service_id'")
         
+        # Get and Save kubeconfig from OneKE
+        kubecfg = self._get_kube_config(one_config['service_id'])
+        with open(one_config['oneconfig_path'], 'w') as file:
+            file.write(kubecfg)
 
         # Overwrite config values
         self.name = 'one'
-
+        self.kubecfg_path = one_config['oneconfig_path']
+        
         super().__init__(one_config, internal_storage)
     
 
@@ -95,7 +101,7 @@ class OpenNebula(KubernetesBackend):
         return service_id
 
 
-    def _wait_for_oneke(self, service_id, timeout=600):
+    def _wait_for_oneke(self, service_id, timeout):
         start_time = time.time()
         minutes_timeout = int(timeout/60)
         logger.debug("Initializing OneKE service. Be patient, this process can take up to {} minutes".format(minutes_timeout))
@@ -104,7 +110,7 @@ class OpenNebula(KubernetesBackend):
             logs = _service_json[service_id]['TEMPLATE']['BODY'].get('log', [])
             if logs:
                 last_log = logs[-1]
-                logger.debug(last_log)
+                logger.debug("Last log: {}".format(last_log))
                 state = last_log['message'].split(':')[-1].strip()
                 # Check OneKE deployment status
                 if state == 'FAILED_DEPLOYING':
@@ -119,3 +125,21 @@ class OpenNebula(KubernetesBackend):
                 raise OneError("Deployment timed out after {} seconds. You can try again once OneKE is in RUNNING state with the service_id option.".format(timeout))
             
             time.sleep(10)
+
+
+    def _get_kube_config(self, service_id):
+        # Get master VM ID
+        _service_json = self.client.servicepool[service_id].info()
+        master_vm_id = next(
+            (role['nodes'][0]['vm_info']['VM']['ID'] for role in _service_json[str(service_id)]['TEMPLATE']['BODY']['roles'] 
+            if role['name'] == 'master'), 
+            None
+        )
+        if master_vm_id is None:
+            raise OneError("Master VM ID not found. Please change the name of the master node to 'master' and try again.")
+        # Get kubeconfig
+        vm = self.one.vm.info(int(master_vm_id))
+        encoded_kubeconfig = vm.USER_TEMPLATE.get('ONEKE_KUBECONFIG')
+        decoded_kubeconfig = base64.b64decode(encoded_kubeconfig).decode('utf-8')
+        logger.debug("OpneNebula OneKE Kubeconfig: {}".format(decoded_kubeconfig))
+        return decoded_kubeconfig

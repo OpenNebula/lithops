@@ -4,7 +4,8 @@ one:
   service_id: # oneke service id (means OneKE is already deployed)
   service_template_id: # oneke_tempalte_id (client has downloaded before)
   oneconfig_path: # PATH to OneKE JSON config
-  
+  timeout: # time to wait for OneKE to be ready
+  kubcfg_path': # PATH were kubeconfig will be stored
   oneke_config:
     public_network_id: # ID for Public vnet
     private_network_id: # ID for Private vnet (if not passed: create a new one)
