@@ -21,12 +21,15 @@ class OneError(Exception):
 def _config_one():  
     env = os.environ
 
-    # Reading the `one_auth` file.
-    # The `one_auth` file path is given in the environment variable
-    # `ONE_AUTH` if exists, otherwise it is in `$HOME/.one/one_auth`.
-    auth_path = env.get('ONE_AUTH') or os.path.expanduser('~/.one/one_auth')
-    with open(auth_path, mode='r') as auth_file:
-        credentials = auth_file.readlines()[0].strip()
+    # Reading the `one_auth` file or environment variable.
+    # `ONE_AUTH` can be a file path or the credentials, otherwise
+    # the default credentials in `$HOME/.one/one_auth` are used.
+    one_auth = env.get('ONE_AUTH') or os.path.expanduser('~/.one/one_auth')
+    if os.path.isfile(one_auth):
+        with open(one_auth, mode='r') as auth_file:
+            credentials = auth_file.readlines()[0].strip()
+    else:
+        credentials = one_auth.strip()
 
     # Reading environment variables.
     # Environment variable `ONESERVER_URL` superseeds the default URL.
@@ -48,14 +51,14 @@ class OpenNebula(KubernetesBackend):
         logger.debug("Initializing OpenNebula python client")
         self.one = _config_one()
 
-        # template_id: instantiate master node
-        if 'template_id' in one_config:
-            one_config['service_id'] = self._instantiate_oneke(one_config['template_id'], one_config['oneke_config'], one_config['oneke_config_path'])
+        # service_template_id: instantiate master node
+        if 'service_template_id' in one_config:
+            one_config['service_id'] = self._instantiate_oneke(one_config['service_template_id'], one_config['oneke_config'], one_config['oneke_config_path'])
             self._wait_for_oneke(one_config['service_id'], one_config['timeout'])
         elif 'service_id' in one_config:
             pass
         else:
-            raise OneError("OpenNebula backend must contain 'template_id' or 'service_id'")
+            raise OneError("OpenNebula backend must contain 'service_template_id' or 'service_id'")
 
         # Check OneKE status
         self._check_oneke(one_config['service_id'])
@@ -73,13 +76,12 @@ class OpenNebula(KubernetesBackend):
     
 
     def invoke(self, docker_image_name, runtime_memory, job_payload):
+        # TODO: add dynamic scaling logic
         super().invoke(docker_image_name, runtime_memory, job_payload)
     
     
     def clear(self, job_keys=None):
-        # First, we clean Kubernetes jobs
         super().clear(job_keys)
-
         # TODO: if all are deteleted -> suspend OneKE VMs (scale down) and
         #       delete them after X minutes
         pass
@@ -110,16 +112,16 @@ class OpenNebula(KubernetesBackend):
         pass
     
 
-    def _instantiate_oneke(self, template_id, oneke_config, oneke_config_path):
+    def _instantiate_oneke(self, service_template_id, oneke_config, oneke_config_path):
         # TODO: create private network if not passed
 
         # Instantiate OneKE (with JSON or oneke_config parameters)
         logger.debug("Instantiating OpenNebula OneKE service")
         if oneke_config_path is not None: 
-            _json = self.client.templatepool[template_id].instantiate(path=oneke_config_path)
+            _json = self.client.templatepool[service_template_id].instantiate(path=oneke_config_path)
         else:  
             oneke_json = json.loads(oneke_config)
-            _json = self.client.templatepool[template_id].instantiate(json_str=oneke_json)
+            _json = self.client.templatepool[service_template_id].instantiate(json_str=oneke_json)
 
         # Get service_id from JSON
         service_id = list(_json.keys())[0]

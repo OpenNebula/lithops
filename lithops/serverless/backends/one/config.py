@@ -163,6 +163,7 @@ DEFAULT_CONFIG_KEYS.update({
     'timeout': 600,
     'kubecfg_path': '/tmp/kube_config',
     'oneke_config_path': None,
+    'delete': False,
 })
 
 
