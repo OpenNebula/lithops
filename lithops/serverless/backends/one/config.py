@@ -164,6 +164,7 @@ DEFAULT_CONFIG_KEYS.update({
     'kubecfg_path': '/tmp/kube_config',
     'oneke_config_path': None,
     'delete': False,
+    'minimum_nodes': 0
 })
 
 

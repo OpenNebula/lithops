@@ -8,7 +8,8 @@ one:
     public_network_id: # ID for Public vnet
     private_network_id: # ID for Private vnet (if not passed: create a new one)
   
-  delete: # if set to True, OneKE VMs will be deleted after all the jobs are finished
+  delete: # if set to True, OneKE will be deleted after all the jobs are finished
+  minimum_nodes: # minimum number of nodes in OneKE
 
   oneke_config_path: # PATH to OneKE JSON config
   timeout: # time to wait for OneKE to be ready
