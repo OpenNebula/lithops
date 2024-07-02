@@ -14,3 +14,7 @@ one:
   oneke_config_path: # PATH to OneKE JSON config
   timeout: # time to wait for OneKE to be ready
   kubecfg_path': # PATH were kubeconfig will be stored
+
+  oneflow_url:
+  oneserver_url:
+  one_auth:

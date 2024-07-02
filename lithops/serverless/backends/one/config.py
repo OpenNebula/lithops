@@ -202,6 +202,8 @@ def load_config(config_data):
     # Ensure 'k8s' key exists and is a dictionary
     if 'k8s' not in config_data or config_data['k8s'] is None:
         config_data['k8s'] = {}
+        config_data['k8s']['docker_user'] = config_data['one']['docker_user']
+        config_data['k8s']['docker_password'] = config_data['one']['docker_password']
 
     # Load k8s default config
     original_load_config(config_data)
