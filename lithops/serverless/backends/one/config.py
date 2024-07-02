@@ -195,10 +195,13 @@ def load_config(config_data):
         # Override oneke_config with a valid JSON to update the service
         config_data['one']['oneke_config'] = json.dumps(oneke_update)
 
-    # TODO: change me
     for key in DEFAULT_CONFIG_KEYS:
         if key not in config_data['one']:
             config_data['one'][key] = DEFAULT_CONFIG_KEYS[key]
+
+    # Ensure 'k8s' key exists and is a dictionary
+    if 'k8s' not in config_data or config_data['k8s'] is None:
+        config_data['k8s'] = {}
 
     # Load k8s default config
     original_load_config(config_data)
