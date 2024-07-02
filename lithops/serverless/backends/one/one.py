@@ -91,25 +91,17 @@ class OpenNebula(KubernetesBackend):
 
     def invoke(self, docker_image_name, runtime_memory, job_payload):
         super()._get_nodes()
-        scale_nodes, pods, chunksize, worker_processes = self._granularity(
-            job_payload['total_calls']
-        )
-
         # Scale nodes
-        if scale_nodes > len(self.nodes):
-            self._scale_oneke(self.nodes, scale_nodes)
+        if len(self.nodes) == 0:
+            self._scale_oneke(self.nodes, 1)
 
         # Setup granularity
-        job_payload['max_workers'] = pods
-        job_payload['chunksize'] = chunksize
-        job_payload['worker_processes'] = worker_processes
+        job_payload['max_workers'] = len(self.nodes)
         super().invoke(docker_image_name, runtime_memory, job_payload)
     
 
     def clear(self, job_keys=None):
         super().clear(job_keys)
-        super()._get_nodes()
-        self._scale_oneke(self.nodes, self.minimum_nodes)
 
 
     def _check_oneke(self):
@@ -225,71 +217,11 @@ class OpenNebula(KubernetesBackend):
                 )
 
 
-    def _granularity(self, total_functions):
-        # Set by the user, otherwise calculated based on OpenNebula available Resources
-        MAX_NODES = 3
-        max_nodes = MAX_NODES if self.maximum_nodes == -1 else self.maximum_nodes
-        # TODO: get info from VM template
-        cpus_per_new_node = 2 
-        # TODO: monitor Scaling to set this value
-        first_node_creation_time = 90
-        additional_node_creation_time = 20
-
-        current_nodes = len(self.nodes)
-        total_cpus_available = int(sum(float(node['cpu']) for node in self.nodes))
-        current_pods = total_cpus_available
-
-        if total_cpus_available > 0:
-            estimated_time_no_scaling = (total_functions / total_cpus_available) * self.average_job_execution
-        else:
-            estimated_time_no_scaling = float('inf')
-        
-        best_time = estimated_time_no_scaling
-        best_nodes_needed = 0
-        estimated_execution_time = float('inf')
-
-        for additional_nodes in range(1, max_nodes - current_nodes + 1):
-            new_total_cpus_available = total_cpus_available + (additional_nodes * cpus_per_new_node)
-            estimated_time_with_scaling = (total_functions / new_total_cpus_available) * self.average_job_execution
-
-            if current_nodes == 0 and additional_nodes == 1:
-                total_creation_time = first_node_creation_time
-            elif current_nodes > 0 and additional_nodes == 1:
-                total_creation_time = additional_node_creation_time
-            else:
-                total_creation_time = first_node_creation_time + (additional_nodes - 1) * additional_node_creation_time if current_nodes == 0 else additional_node_creation_time * additional_nodes
-
-            total_estimated_time_with_scaling = estimated_time_with_scaling + total_creation_time
-
-            if total_estimated_time_with_scaling < best_time and new_total_cpus_available <= total_functions:
-                best_time = total_estimated_time_with_scaling
-                best_nodes_needed = additional_nodes
-                current_pods = new_total_cpus_available
-                estimated_execution_time = estimated_time_with_scaling
-
-
-        nodes = current_nodes + best_nodes_needed
-        pods = min(total_functions, current_pods)
-
-        logger.info(
-            f"Nodes: {nodes}, Pods: {pods}, Chunksize: 1, Worker Processes: 1"
-        )
-        logger.info(
-            f"Estimated Execution Time (without creation): {estimated_execution_time:.2f} seconds"
-        )
-        return nodes, pods, 1, 1
-
-
-
     def _scale_oneke(self, nodes, scale_nodes):
         logger.info(f"Scaling workers from {len(nodes)} to {scale_nodes} nodes")
         # Ensure the service can be scaled
         state = self._get_latest_state()
         if state == 'COOLDOWN':
-            if len(self.nodes) == 0:
-                self._wait_for_oneke('RUNNING')
-            else:
-                logger.info("OneKE service is in 'COOLDOWN' state and does not need to be scaled")
-                return
+            self._wait_for_oneke('RUNNING')
         self.client.servicepool[self.service_id].role["worker"].scale(int(scale_nodes))
         self._wait_for_oneke('COOLDOWN')
