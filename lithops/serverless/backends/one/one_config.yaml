@@ -8,13 +8,17 @@ one:
     public_network_id: # ID for Public vnet
     private_network_id: # ID for Private vnet (if not passed: create a new one)
   
+  oneflow_url:
+  oneserver_url:
+  one_auth:
+
   delete: # if set to True, OneKE will be deleted after all the jobs are finished
   minimum_nodes: # minimum number of nodes in OneKE
+  maximum_nodes: # maximum number of nodes in OneKE
 
   oneke_config_path: # PATH to OneKE JSON config
   timeout: # time to wait for OneKE to be ready
   kubecfg_path': # PATH were kubeconfig will be stored
 
-  oneflow_url:
-  oneserver_url:
-  one_auth:
+  average_job_execution: # average job execution time
+  auto_scale: # if set to True, OneKE will be scaled automatically

@@ -5,6 +5,7 @@ import oneflow
 import pyone
 
 import os
+import re
 import json
 import time
 import base64
@@ -49,6 +50,13 @@ class OpenNebula(KubernetesBackend):
         self.name = 'one'
         self.timeout = one_config['timeout']
         self.minimum_nodes = one_config['minimum_nodes']
+        self.maximum_nodes = one_config['maximum_nodes']
+        self.average_job_execution = one_config['average_job_execution']
+
+        # Export environment variables
+        os.environ['ONEFLOW_URL'] = one_config['oneflow_url']
+        os.environ['ONESERVER_URL'] = one_config['oneserver_url']
+        os.environ['ONE_AUTH'] = one_config['one_auth']
 
         logger.debug("Initializing Oneflow python client")
         self.client = oneflow.OneFlowClient()
@@ -82,8 +90,8 @@ class OpenNebula(KubernetesBackend):
     
 
     def invoke(self, docker_image_name, runtime_memory, job_payload):
-        super()._get_nodes()
-        pods, scale_nodes, chunksize, worker_processes = self._granularity(
+        self._get_nodes()
+        scale_nodes, pods, chunksize, worker_processes = self._granularity(
             job_payload['total_calls']
         )
 
@@ -101,12 +109,9 @@ class OpenNebula(KubernetesBackend):
 
     def clear(self, job_keys=None):
         super().clear(job_keys)
-        # scale down only if the cooldown time has passed
-        state = self._get_latest_state()
-        if state != 'COOLDOWN':
-            super()._get_nodes()
-            self._scale_oneke(self.nodes, self.minimum_nodes)
-    
+        super()._get_nodes()
+        self._scale_oneke(self.nodes, self.minimum_nodes)
+
 
     def _check_oneke(self):
         logger.info("Checking OpenNebula OneKE service status")
@@ -222,41 +227,91 @@ class OpenNebula(KubernetesBackend):
 
 
     def _granularity(self, total_functions):
-        MAX_PODS_PER_NODE = 1
-        MAX_FUNCTIONS_PER_POD = 25
+        # Set by the user, otherwise calculated based on OpenNebula available Resources
+        MAX_NODES = 3
+        max_nodes= MAX_NODES if self.maximum_nodes is -1 else self.maximum_nodes
+        # TODO: get info from VM template
+        cpus_per_new_node=2 
+        # TODO: monitor Scaling to set this value
+        first_node_creation_time=90
+        additional_node_creation_time=20
 
-        # Calculate number of WORKERS (PODs)
-        # TODO: current number of pods depends on node resources
-        current_pods = len(self.nodes) // MAX_PODS_PER_NODE
-        req_pods = (
-            total_functions + MAX_FUNCTIONS_PER_POD - 1
-        ) // MAX_FUNCTIONS_PER_POD
-        pods = max(req_pods, current_pods)
+        current_nodes = len(self.nodes)
+        total_cpus_available = sum(node['total_cpu'] - node['used_cpu'] for node in self.nodes)
+        current_pods = total_cpus_available
 
-        # Calculate number of NODES
-        # TODO: 1 node can have multiple pods
-        nodes = max(pods, len(self.nodes))
+        if total_cpus_available > 0:
+            estimated_time_no_scaling = (total_functions / total_cpus_available) * self.average_job_execution
+        else:
+            estimated_time_no_scaling = float('inf') 
         
-        # Calculate number of functions executors per WORKER (POD)
-        # TODO: current number of executors depends on POD resources
-        worker_processes = 1
-        
-        # Calculate number of functions per WORKER (POD)
-        # TODO: depends on worker_processes
-        chunksize = 1
+        best_time = estimated_time_no_scaling
+        best_nodes_needed = 0
 
+        for additional_nodes in range(1, max_nodes - current_nodes + 1):
+            new_total_cpus_available = total_cpus_available + (additional_nodes * cpus_per_new_node)
+            estimated_time_with_scaling = (total_functions / new_total_cpus_available) * self.average_job_execution
+
+            if current_nodes == 0:
+                total_creation_time = first_node_creation_time + (additional_nodes - 1) * additional_node_creation_time
+            else:
+                total_creation_time = additional_node_creation_time * additional_nodes
+            
+            total_estimated_time_with_scaling = estimated_time_with_scaling + total_creation_time
+
+            if total_estimated_time_with_scaling < best_time:
+                best_time = total_estimated_time_with_scaling
+                best_nodes_needed = additional_nodes
+                current_pods = total_cpus_available + new_total_cpus_available
+
+
+        nodes = current_nodes + best_nodes_needed
+        pods = current_pods
         logger.info(
-            f"Pods: {pods}, Nodes: {nodes}, " 
-            f"Chunksize: {chunksize}, Worker Processes: {worker_processes}"
+            f"Nodes: {nodes}, Pods: {pods}, Chunksize: 1, Worker Processes: 1"
         )
-        return pods, nodes, chunksize, worker_processes
+        return nodes, pods, 1, 1
 
 
     def _scale_oneke(self, nodes, scale_nodes):
         logger.info(f"Scaling workers from {len(nodes)} to {scale_nodes} nodes")
         # Ensure the service can be scaled
         state = self._get_latest_state()
-        if len(self.nodes) == 0 and state == 'COOLDOWN':
-            self._wait_for_oneke('RUNNING')
+        if state == 'COOLDOWN':
+            if len(self.nodes) == 0:
+                self._wait_for_oneke('RUNNING')
+            else:
+                logger.info("OneKE service is in 'COOLDOWN' state and does not need to be scaled")
+                return
         self.client.servicepool[self.service_id].role["worker"].scale(int(scale_nodes))
         self._wait_for_oneke('COOLDOWN')
+
+
+    def _get_nodes(self):
+        self.nodes = []
+        list_all_nodes = self.core_api.list_node()
+        for node in list_all_nodes.items:
+            if node.spec.taints:
+                continue
+            
+            total_cpu = node.status.allocatable['cpu']
+            used_cpu = node.status.capacity['cpu']
+            total_memory = node.status.allocatable['memory']
+            used_memory = node.status.capacity['memory']
+            
+            if 'm' in total_cpu:
+                total_cpu = int(re.search(r'\d+', total_cpu).group()) / 1000
+            if 'm' in used_cpu:
+                used_cpu = int(re.search(r'\d+', used_cpu).group()) / 1000
+            if 'Ki' in total_memory:
+                total_memory = int(re.search(r'\d+', total_memory).group()) / 1024
+            if 'Ki' in used_memory:
+                used_memory = int(re.search(r'\d+', used_memory).group()) / 1024
+            
+            self.nodes.append({
+                "name": node.metadata.name,
+                "total_cpu": total_cpu,
+                "total_memory": total_memory,
+                "used_cpu": used_cpu,
+                "used_memory": used_memory
+            })
