@@ -226,39 +226,32 @@ class OpenNebula(KubernetesBackend):
 
 
     def _granularity(self, total_functions):
-        # Set by the user, otherwise calculated based on OpenNebula available Resources
-        MAX_NODES = 3
-        max_nodes = MAX_NODES if self.maximum_nodes == -1 else self.maximum_nodes
-        # TODO: get info from VM template
-        cpus_per_new_node = 2 
-        # TODO: monitor Scaling to set this value
-        first_node_creation_time = 90
-        additional_node_creation_time = 20
-
+        _host_cpu, _host_mem = self._one_resources()
+        _node_cpu, _node_mem = self._node_resources()
+        # OpenNebula available resources
+        max_nodes_cpu = int(_host_cpu / _node_cpu)
+        max_nodes_mem = int(_host_mem / _node_mem)
+        # OneKE current available resources
         current_nodes = len(self.nodes)
         total_cpus_available = int(sum(float(node['cpu']) for node in self.nodes))
-        current_pods = total_cpus_available
-
         if total_cpus_available > 0:
             estimated_time_no_scaling = (total_functions / total_cpus_available) * self.average_job_execution
         else:
             estimated_time_no_scaling = float('inf')
+
+        # Set by the user, otherwise calculated based on OpenNebula available Resources
+        max_nodes = min(max_nodes_cpu, max_nodes_mem) + current_nodes
+        total_nodes = max_nodes if self.maximum_nodes == -1 else self.maximum_nodes
         
         best_time = estimated_time_no_scaling
         best_nodes_needed = 0
-        estimated_execution_time = float('inf')
+        estimated_execution_time = (total_functions / total_cpus_available) * self.average_job_execution
+        current_pods = total_cpus_available
 
-        for additional_nodes in range(1, max_nodes - current_nodes + 1):
-            new_total_cpus_available = total_cpus_available + (additional_nodes * cpus_per_new_node)
+        for additional_nodes in range(1, total_nodes - current_nodes + 1):
+            new_total_cpus_available = total_cpus_available + (additional_nodes * int(_node_cpu))
             estimated_time_with_scaling = (total_functions / new_total_cpus_available) * self.average_job_execution
-
-            if current_nodes == 0 and additional_nodes == 1:
-                total_creation_time = first_node_creation_time
-            elif current_nodes > 0 and additional_nodes == 1:
-                total_creation_time = additional_node_creation_time
-            else:
-                total_creation_time = first_node_creation_time + (additional_nodes - 1) * additional_node_creation_time if current_nodes == 0 else additional_node_creation_time * additional_nodes
-
+            total_creation_time = self._get_total_creation_time(additional_nodes)
             total_estimated_time_with_scaling = estimated_time_with_scaling + total_creation_time
 
             if total_estimated_time_with_scaling < best_time and new_total_cpus_available <= total_functions:
@@ -266,7 +259,6 @@ class OpenNebula(KubernetesBackend):
                 best_nodes_needed = additional_nodes
                 current_pods = new_total_cpus_available
                 estimated_execution_time = estimated_time_with_scaling
-
 
         nodes = current_nodes + best_nodes_needed
         pods = min(total_functions, current_pods)
@@ -293,3 +285,47 @@ class OpenNebula(KubernetesBackend):
                 return
         self.client.servicepool[self.service_id].role["worker"].scale(int(scale_nodes))
         self._wait_for_oneke('COOLDOWN')
+
+
+    def _one_resources(self):
+        hostpool = self.pyone.hostpool.info()
+        host = hostpool.HOST[0]
+        
+        total_cpu = host.HOST_SHARE.TOTAL_CPU
+        used_cpu = host.HOST_SHARE.CPU_USAGE
+
+        total_memory = host.HOST_SHARE.TOTAL_MEM
+        used_memory = host.HOST_SHARE.MEM_USAGE
+
+        one_cpu = (total_cpu - used_cpu)/100
+        one_memory = (total_memory - used_memory)/1000
+        logger.info(
+            f"Available CPU: {one_cpu}, Available Memory: {one_memory}"
+        )
+        return one_cpu, one_memory
+
+
+    def _node_resources(self):
+        _service_json = self.client.servicepool[self.service_id].info()
+        _service_roles = _service_json[str(self.service_id)]['TEMPLATE']['BODY']['roles']
+
+        for role in _service_roles:
+            if role['name'] == 'worker':
+                vm_template_id = role['vm_template']
+                break
+        
+        vm_template = self.pyone.template.info(int(vm_template_id)).TEMPLATE
+        template_cpu = float(vm_template['CPU'])
+        template_memory = float(vm_template['MEMORY'])
+        logger.info(f"Template CPU: {template_cpu}, Template Memory: {template_memory}")
+        return template_cpu, template_memory
+
+
+    def _get_total_creation_time(self, additional_nodes):
+        # TODO: monitor Scaling to set this value
+        first_node_creation_time = 90
+        additional_node_creation_time = 20
+
+        if additional_nodes == 1:
+            return first_node_creation_time
+        return first_node_creation_time + (additional_nodes - 1) * additional_node_creation_time
