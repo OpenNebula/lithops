@@ -234,16 +234,14 @@ class OpenNebula(KubernetesBackend):
         # OneKE current available resources
         current_nodes = len(self.nodes)
         total_cpus_available = int(sum(float(node['cpu']) for node in self.nodes))
-        if total_cpus_available > 0:
-            estimated_time_no_scaling = (total_functions / total_cpus_available) * self.average_job_execution
-        else:
-            estimated_time_no_scaling = float('inf')
-
         # Set by the user, otherwise calculated based on OpenNebula available Resources
         max_nodes = min(max_nodes_cpu, max_nodes_mem) + current_nodes
         total_nodes = max_nodes if self.maximum_nodes == -1 else self.maximum_nodes
         
-        best_time = estimated_time_no_scaling
+        if total_cpus_available > 0:
+            best_time = (total_functions / total_cpus_available) * self.average_job_execution
+        else:
+            best_time = float('inf')
         best_nodes_needed = 0
         estimated_execution_time = (total_functions / total_cpus_available) * self.average_job_execution
         current_pods = total_cpus_available
@@ -329,3 +327,10 @@ class OpenNebula(KubernetesBackend):
         if additional_nodes == 1:
             return first_node_creation_time
         return first_node_creation_time + (additional_nodes - 1) * additional_node_creation_time
+
+
+    def _generate_runtime_meta(self, docker_image_name):
+        super()._get_nodes()
+        if len(self.nodes) == 0:
+            self._scale_oneke(self.nodes, 1)
+        super()._generate_runtime_meta(docker_image_name)
