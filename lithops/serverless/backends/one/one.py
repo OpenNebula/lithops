@@ -52,6 +52,7 @@ class OpenNebula(KubernetesBackend):
         self.minimum_nodes = one_config['minimum_nodes']
         self.maximum_nodes = one_config['maximum_nodes']
         self.average_job_execution = one_config['average_job_execution']
+        self.job_clean = set() 
 
         # Export environment variables
         os.environ['ONEFLOW_URL'] = one_config['oneflow_url']
@@ -96,6 +97,11 @@ class OpenNebula(KubernetesBackend):
         )
 
         # Scale nodes
+        if scale_nodes == 0 and len(self.nodes) == 0:
+            raise OneError(
+                f"No nodes available and can't scale. Ensure nodes are active, detected by "
+                f"Kubernetes, and have enough resources to scale."
+            )
         if scale_nodes > len(self.nodes):
             self._scale_oneke(self.nodes, scale_nodes)
 
@@ -107,9 +113,13 @@ class OpenNebula(KubernetesBackend):
     
 
     def clear(self, job_keys=None):
-        super().clear(job_keys)
-        super()._get_nodes()
-        self._scale_oneke(self.nodes, self.minimum_nodes)
+        if job_keys:
+            new_keys = [key for key in job_keys if key not in self.job_clean]
+            if new_keys:
+                self.job_clean.update(new_keys)
+                super().clear(job_keys)
+                super()._get_nodes()
+                self._scale_oneke(self.nodes, self.minimum_nodes)
 
 
     def _check_oneke(self):
