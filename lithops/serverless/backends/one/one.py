@@ -87,7 +87,7 @@ class OpenNebula(KubernetesBackend):
         self.kubecfg_path = one_config['kubecfg_path']
 
         super().__init__(one_config, internal_storage)
-    
+
 
     def invoke(self, docker_image_name, runtime_memory, job_payload):
         super()._get_nodes()
@@ -103,7 +103,7 @@ class OpenNebula(KubernetesBackend):
         job_payload['max_workers'] = pods
         job_payload['chunksize'] = chunksize
         job_payload['worker_processes'] = worker_processes
-        super().invoke(docker_image_name, runtime_memory, job_payload)
+        return super().invoke(docker_image_name, runtime_memory, job_payload)
     
 
     def clear(self, job_keys=None):
@@ -237,20 +237,23 @@ class OpenNebula(KubernetesBackend):
         # Set by the user, otherwise calculated based on OpenNebula available Resources
         max_nodes = min(max_nodes_cpu, max_nodes_mem) + current_nodes
         total_nodes = max_nodes if self.maximum_nodes == -1 else self.maximum_nodes
-        
+
         if total_cpus_available > 0:
             best_time = (total_functions / total_cpus_available) * self.average_job_execution
         else:
             best_time = float('inf')
         best_nodes_needed = 0
-        estimated_execution_time = (total_functions / total_cpus_available) * self.average_job_execution
+        estimated_execution_time = best_time
         current_pods = total_cpus_available
 
         for additional_nodes in range(1, total_nodes - current_nodes + 1):
             new_total_cpus_available = total_cpus_available + (additional_nodes * int(_node_cpu))
-            estimated_time_with_scaling = (total_functions / new_total_cpus_available) * self.average_job_execution
-            total_creation_time = self._get_total_creation_time(additional_nodes)
-            total_estimated_time_with_scaling = estimated_time_with_scaling + total_creation_time
+            if new_total_cpus_available > 0:
+                estimated_time_with_scaling = (total_functions / new_total_cpus_available) * self.average_job_execution
+                total_creation_time = self._get_total_creation_time(additional_nodes)
+                total_estimated_time_with_scaling = estimated_time_with_scaling + total_creation_time
+            else:
+                total_estimated_time_with_scaling = float('inf')
 
             if total_estimated_time_with_scaling < best_time and new_total_cpus_available <= total_functions:
                 best_time = total_estimated_time_with_scaling
@@ -268,7 +271,6 @@ class OpenNebula(KubernetesBackend):
             f"Estimated Execution Time (without creation): {estimated_execution_time:.2f} seconds"
         )
         return nodes, pods, 1, 1
-
 
 
     def _scale_oneke(self, nodes, scale_nodes):
@@ -329,8 +331,8 @@ class OpenNebula(KubernetesBackend):
         return first_node_creation_time + (additional_nodes - 1) * additional_node_creation_time
 
 
-    def _generate_runtime_meta(self, docker_image_name):
+    def deploy_runtime(self, docker_image_name, memory, timeout):
         super()._get_nodes()
         if len(self.nodes) == 0:
             self._scale_oneke(self.nodes, 1)
-        super()._generate_runtime_meta(docker_image_name)
+        return super().deploy_runtime(docker_image_name, memory, timeout)
