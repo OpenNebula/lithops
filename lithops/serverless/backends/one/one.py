@@ -49,9 +49,12 @@ class OpenNebula(KubernetesBackend):
         # Overwrite config values
         self.name = 'one'
         self.timeout = one_config['timeout']
+        self.auto_scale = one_config['auto_scale']
         self.minimum_nodes = one_config['minimum_nodes']
         self.maximum_nodes = one_config['maximum_nodes']
-        self.average_job_execution = one_config['average_job_execution']
+        self.runtime_cpu = float(one_config['runtime_cpu'])
+        self.runtime_memory = float(one_config['runtime_memory'])
+        self.average_job_execution = float(one_config['average_job_execution'])
         self.job_clean = set() 
 
         # Export environment variables
@@ -102,7 +105,7 @@ class OpenNebula(KubernetesBackend):
                 f"No nodes available and can't scale. Ensure nodes are active, detected by "
                 f"Kubernetes, and have enough resources to scale."
             )
-        if scale_nodes > len(self.nodes):
+        if scale_nodes > len(self.nodes) and self.auto_scale in {'all', 'up'}:
             self._scale_oneke(self.nodes, scale_nodes)
 
         # Setup granularity
@@ -113,13 +116,19 @@ class OpenNebula(KubernetesBackend):
     
 
     def clear(self, job_keys=None):
-        if job_keys:
-            new_keys = [key for key in job_keys if key not in self.job_clean]
-            if new_keys:
-                self.job_clean.update(new_keys)
-                super().clear(job_keys)
-                super()._get_nodes()
-                self._scale_oneke(self.nodes, self.minimum_nodes)
+        if not job_keys:
+            return
+
+        new_keys = [key for key in job_keys if key not in self.job_clean]
+        if not new_keys:
+            return
+
+        self.job_clean.update(new_keys)
+        super().clear(job_keys)
+        super()._get_nodes()
+        
+        if self.auto_scale in {'all', 'down'}:
+            self._scale_oneke(self.nodes, self.minimum_nodes)
 
 
     def _check_oneke(self):
@@ -243,42 +252,35 @@ class OpenNebula(KubernetesBackend):
         max_nodes_mem = int(_host_mem / _node_mem)
         # OneKE current available resources
         current_nodes = len(self.nodes)
-        total_cpus_available = int(sum(float(node['cpu']) for node in self.nodes))
+        total_pods_cpu = sum(int(float(node['cpu']) // self.runtime_cpu) for node in self.nodes)
+        total_pods_mem = sum(
+            int(self._parse_unit(node['memory']) // self.runtime_memory)
+            for node in self.nodes
+        )
+        current_pods = min(total_pods_cpu, total_pods_mem)
         # Set by the user, otherwise calculated based on OpenNebula available Resources
         max_nodes = min(max_nodes_cpu, max_nodes_mem) + current_nodes
         total_nodes = max_nodes if self.maximum_nodes == -1 else self.maximum_nodes
-
-        if total_cpus_available > 0:
-            best_time = (total_functions / total_cpus_available) * self.average_job_execution
-        else:
-            best_time = float('inf')
-        best_nodes_needed = 0
-        estimated_execution_time = best_time
-        current_pods = total_cpus_available
-
+        # Calculate the best time with scaling
+        best_time = (total_functions / current_pods) * self.average_job_execution if current_pods > 0 else float('inf')
         for additional_nodes in range(1, total_nodes - current_nodes + 1):
-            new_total_cpus_available = total_cpus_available + (additional_nodes * int(_node_cpu))
-            if new_total_cpus_available > 0:
-                estimated_time_with_scaling = (total_functions / new_total_cpus_available) * self.average_job_execution
+            new_pods = min(int(_node_cpu // self.runtime_cpu), int(_node_mem // self.runtime_memory))
+            if new_pods > 0 and (current_pods <= total_functions):
+                estimated_time_with_scaling = (total_functions / (current_pods+new_pods)) * self.average_job_execution
                 total_creation_time = self._get_total_creation_time(additional_nodes)
                 total_estimated_time_with_scaling = estimated_time_with_scaling + total_creation_time
-            else:
-                total_estimated_time_with_scaling = float('inf')
+                if total_estimated_time_with_scaling < best_time:
+                    best_time = total_estimated_time_with_scaling
+                    current_nodes += 1
+                    new_pods_cpu = int(_node_cpu // self.runtime_cpu)
+                    new_pods_mem = int(_node_mem // self.runtime_memory)
+                    current_pods += min(new_pods_cpu, new_pods_mem)
 
-            if total_estimated_time_with_scaling < best_time and new_total_cpus_available <= total_functions:
-                best_time = total_estimated_time_with_scaling
-                best_nodes_needed = additional_nodes
-                current_pods = new_total_cpus_available
-                estimated_execution_time = estimated_time_with_scaling
-
-        nodes = current_nodes + best_nodes_needed
+        nodes = current_nodes
         pods = min(total_functions, current_pods)
 
         logger.info(
             f"Nodes: {nodes}, Pods: {pods}, Chunksize: 1, Worker Processes: 1"
-        )
-        logger.info(
-            f"Estimated Execution Time (without creation): {estimated_execution_time:.2f} seconds"
         )
         return nodes, pods, 1, 1
 
@@ -332,13 +334,22 @@ class OpenNebula(KubernetesBackend):
 
 
     def _get_total_creation_time(self, additional_nodes):
-        # TODO: monitor Scaling to set this value
-        first_node_creation_time = 90
-        additional_node_creation_time = 20
+        # First node creation time is 90 seconds
+        # Additional nodes take 30 seconds in total, regardless of the number
+        return 90 if additional_nodes == 1 else 120
 
-        if additional_nodes == 1:
-            return first_node_creation_time
-        return first_node_creation_time + (additional_nodes - 1) * additional_node_creation_time
+
+    def _parse_unit(self, unit_str):
+        unit = unit_str[-2:]
+        value = float(unit_str[:-2])
+        if unit == 'Ki':
+            return value
+        elif unit == 'Mi':
+            return value * 1024
+        elif unit == 'Gi':
+            return value * 1024 * 1024
+        else:
+            raise ValueError(f"Unsupported unit: {unit_str}")
 
 
     def deploy_runtime(self, docker_image_name, memory, timeout):

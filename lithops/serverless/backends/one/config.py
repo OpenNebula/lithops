@@ -4,7 +4,6 @@ import json
 
 from lithops.serverless.backends.k8s.config import (
     DEFAULT_CONFIG_KEYS,
-    DOCKERFILE_DEFAULT,
     load_config as original_load_config
 )
 
@@ -17,7 +16,6 @@ MANDATORY_CONFIG_KEYS = {
     "public_network_id",
     "private_network_id"
 }
-
 
 OPTIONAL_CONFIG_KEYS = {
     "ONEAPP_VROUTER_ETH0_VIP0": "",
@@ -52,24 +50,12 @@ OPTIONAL_CONFIG_KEYS = {
     "ONEAPP_VNF_ROUTER4_INTERFACES": "eth0,eth1"
 }
 
-
 DEFAULT_PRIVATE_VNET = """
 NAME    = "private-oneke"
 VN_MAD  = "bridge"
 AUTOMATIC_VLAN_ID = "YES"
 AR = [TYPE = "IP4", IP = "192.168.150.0", SIZE = "51"]
 """
-
-
-FH_ZIP_LOCATION = os.path.join(os.getcwd(), 'lithops_one.zip')
-
-
-# Overwrite default Dockerfile
-DOCKERFILE_DEFAULT = "\n".join(DOCKERFILE_DEFAULT.split('\n')[:-2]) + """
-COPY lithops_one.zip .
-RUN unzip lithops_one.zip && rm lithops_one.zip
-"""
-
 
 STATE = {
     0: "INIT",
@@ -84,7 +70,6 @@ STATE = {
     10: "CLONING",
     11: "CLONING_FAILURE"
 }
-
 
 LCM_STATE = {
     0: "LCM_INIT",
@@ -157,7 +142,6 @@ LCM_STATE = {
     70: "BACKUP_POWEROFF"
 }
 
-
 # Add OpenNebula defaults
 DEFAULT_CONFIG_KEYS.update({
     'timeout': 600,
@@ -167,6 +151,7 @@ DEFAULT_CONFIG_KEYS.update({
     'minimum_nodes': 0,
     'maximum_nodes': -1,
     'average_job_execution': 1,
+    'auto_scale': 'all',
 })
 
 
@@ -197,6 +182,7 @@ def load_config(config_data):
         # Override oneke_config with a valid JSON to update the service
         config_data['one']['oneke_config'] = json.dumps(oneke_update)
 
+    # Load default config
     for key in DEFAULT_CONFIG_KEYS:
         if key not in config_data['one']:
             config_data['one'][key] = DEFAULT_CONFIG_KEYS[key]

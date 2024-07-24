@@ -2,23 +2,24 @@ lithops:
   backend: one
 one:
   service_id: # oneke service id (means OneKE is already deployed)
-  service_template_id: # oneke_tempalte_id (client has downloaded before)
+  service_template_id: # oneke_tempalte_id (client has only downloaded the template)
 
   oneke_config:
     public_network_id: # ID for Public vnet
-    private_network_id: # ID for Private vnet (if not passed: create a new one)
+    private_network_id: # ID for Private vnet
   
-  oneflow_url:
-  oneserver_url:
-  one_auth:
+  oneflow_url: # OneFlow server URL
+  oneserver_url: #Oned server URL
+  one_auth: # OpenNebula credentials
 
-  delete: # if set to True, OneKE will be deleted after all the jobs are finished
-  minimum_nodes: # minimum number of nodes in OneKE
+  runtime_cpu: # number of vCPU x POD (default: 1)
+  runtime_memory: # amount of memory x POD (default: 512MiB)
+  minimum_nodes: # minimum number of nodes in OneKE (default: 0)
   maximum_nodes: # maximum number of nodes in OneKE
 
   oneke_config_path: # PATH to OneKE JSON config
-  timeout: # time to wait for OneKE to be ready
-  kubecfg_path': # PATH were kubeconfig will be stored
+  timeout: # time to wait for OneKE to be ready (default: 600s)
+  kubecfg_path': # PATH were kubeconfig will be stored (default: `/tmp/kubeconfig`)
 
-  average_job_execution: # average job execution time
-  auto_scale: # if set to True, OneKE will be scaled automatically
+  average_job_execution: # average job execution time (default: 1s)
+  auto_scale: # options: `'all'` (default), `'up'`, `'down'`, `'none'`
