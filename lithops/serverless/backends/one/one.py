@@ -252,7 +252,7 @@ class OpenNebula(KubernetesBackend):
         max_nodes_mem = int(_host_mem / _node_mem)
         # OneKE current available resources
         current_nodes = len(self.nodes)
-        total_pods_cpu = sum(int(float(node['cpu']) // self.runtime_cpu) for node in self.nodes)
+        total_pods_cpu = sum(int((float(node['cpu'])-1) // self.runtime_cpu) for node in self.nodes)
         total_pods_mem = sum(
             int(self._parse_unit(node['memory']) // self.runtime_memory)
             for node in self.nodes
@@ -260,7 +260,7 @@ class OpenNebula(KubernetesBackend):
         current_pods = min(total_pods_cpu, total_pods_mem)
         # Set by the user, otherwise calculated based on OpenNebula available Resources
         max_nodes = min(max_nodes_cpu, max_nodes_mem) + current_nodes
-        total_nodes = max_nodes if self.maximum_nodes == -1 else self.maximum_nodes
+        total_nodes = max_nodes if self.maximum_nodes == -1 else min(self.maximum_nodes, max_nodes)
         # Calculate the best time with scaling
         best_time = (total_functions / current_pods) * self.average_job_execution if current_pods > 0 else float('inf')
         for additional_nodes in range(1, total_nodes - current_nodes + 1):
