@@ -94,12 +94,17 @@ class OpenNebula(KubernetesBackend):
 
 
     def invoke(self, docker_image_name, runtime_memory, job_payload):
+        # Wait for nodes to become available in Kubernetes
+        vms = len(self._get_vm_workers())
         super()._get_nodes()
+        while len(self.nodes) < vms:
+            time.sleep(1)
+            super()._get_nodes()
+
+        # Scale nodes
         scale_nodes, pods, chunksize, worker_processes = self._granularity(
             job_payload['total_calls']
         )
-
-        # Scale nodes
         if scale_nodes == 0 and len(self.nodes) == 0:
             raise OneError(
                 f"No nodes available and can't scale. Ensure nodes are active, detected by "
@@ -242,6 +247,17 @@ class OpenNebula(KubernetesBackend):
                     f"STATE={state_desc} (code {state}), "
                     f"LCM_STATE={lcm_state_desc} (code {lcm_state})"
                 )
+
+
+    def _get_vm_workers(self):
+        workers_ids = set()
+        _service_json = self.client.servicepool[self.service_id].info()
+        roles = _service_json[str(self.service_id)]['TEMPLATE']['BODY']['roles']
+        for role in roles:
+            if role['name'] == 'worker':
+                for node in role['nodes']:
+                    workers_ids.add(node['vm_info']['VM']['ID'])
+        return workers_ids
 
 
     def _granularity(self, total_functions):
