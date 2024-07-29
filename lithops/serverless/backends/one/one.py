@@ -5,7 +5,6 @@ import oneflow
 import pyone
 
 import os
-import re
 import json
 import time
 import base64
@@ -95,11 +94,8 @@ class OpenNebula(KubernetesBackend):
 
     def invoke(self, docker_image_name, runtime_memory, job_payload):
         # Wait for nodes to become available in Kubernetes
-        vms = len(self._get_vm_workers())
-        super()._get_nodes()
-        while len(self.nodes) < vms:
-            time.sleep(1)
-            super()._get_nodes()
+        vm_workers = len(self._get_vm_workers())
+        self._wait_kubernetes_nodes(vm_workers)
 
         # Scale nodes
         scale_nodes, pods, chunksize, worker_processes = self._granularity(
@@ -112,6 +108,7 @@ class OpenNebula(KubernetesBackend):
             )
         if scale_nodes > len(self.nodes) and self.auto_scale in {'all', 'up'}:
             self._scale_oneke(self.nodes, scale_nodes)
+            self._wait_kubernetes_nodes(scale_nodes)
 
         # Setup granularity
         job_payload['max_workers'] = pods
@@ -373,3 +370,10 @@ class OpenNebula(KubernetesBackend):
         if len(self.nodes) == 0:
             self._scale_oneke(self.nodes, 1)
         return super().deploy_runtime(docker_image_name, memory, timeout)
+
+
+    def _wait_kubernetes_nodes(self, total):
+        super()._get_nodes()
+        while len(self.nodes) < total:
+            time.sleep(1)
+            super()._get_nodes()
