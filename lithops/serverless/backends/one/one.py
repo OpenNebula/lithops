@@ -30,8 +30,6 @@ class OpenNebula(KubernetesBackend):
         self.auto_scale = one_config["auto_scale"]
         self.runtime_cpu = float(one_config["runtime_cpu"])
         self.runtime_memory = float(one_config["runtime_memory"])
-        self.worker_cpu = float(one_config["worker_cpu"])
-        self.worker_memory = float(one_config["worker_memory"])
         self.job_clean = set()
         # TODO: get this values
         self.minimum_nodes = one_config["minimum_nodes"]
@@ -152,20 +150,22 @@ class OpenNebula(KubernetesBackend):
         )
 
     def _granularity(self, total_functions):
-        workers_per_pod = (self.worker_cpu - 1) // self.runtime_cpu
         oneke_nodes = len(self.nodes)
-        oneke_workers = oneke_nodes * workers_per_pod
-        # Determine granularity
+        oneke_workers = oneke_nodes * (self.runtime_cpu - 1)
         nodes = (
             oneke_nodes
             if total_functions <= oneke_workers
             else oneke_nodes + (self.maximum_nodes - oneke_nodes)
         )
-        workers = int(min(workers_per_pod, math.ceil(total_functions / nodes)))
-        logger.info(
-            f"Nodes: {nodes}, Pods: {nodes}, Chunksize: 1, Worker Processes: {workers}"
+        workers = int(
+            math.ceil(total_functions / nodes)
+            if total_functions <= oneke_workers
+            else (self.runtime_cpu - 1)
         )
-        return nodes, nodes, 1, workers
+        logger.info(
+            f"Nodes: {nodes}, Pods: {nodes}, Chunksize: {workers}, Worker Processes: {workers}"
+        )
+        return nodes, nodes, workers, workers
 
     def _scale_oneke(self, nodes, scale_nodes):
         logger.info(f"Scaling workers from {len(nodes)} to {scale_nodes} nodes")
