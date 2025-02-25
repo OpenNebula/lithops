@@ -135,9 +135,8 @@ class OpenNebula(KubernetesBackend):
             f"Wait time: {minutes_timeout} minutes"
         )
         while (elapsed_time := time.time() - start_time) <= timeout:
-            service_state = (
-                self.client.get("service", {}).get("SERVICE", {}).get("state")
-            )
+            service_data = self.client.get("service")
+            service_state = service_data.get("SERVICE", {}).get("state")
             if service_state == ServiceState[state].value:
                 logger.info(
                     f"OneKE service is {state} after {int(elapsed_time)} seconds."
@@ -151,7 +150,7 @@ class OpenNebula(KubernetesBackend):
 
     def _granularity(self, total_functions):
         oneke_nodes = len(self.nodes)
-        oneke_workers = oneke_nodes * (self.runtime_cpu - 1)
+        oneke_workers = oneke_nodes * int(self.runtime_cpu)
         nodes = (
             oneke_nodes
             if total_functions <= oneke_workers
@@ -160,7 +159,7 @@ class OpenNebula(KubernetesBackend):
         workers = int(
             math.ceil(total_functions / nodes)
             if total_functions <= oneke_workers
-            else (self.runtime_cpu - 1)
+            else (self.runtime_cpu)
         )
         logger.info(
             f"Nodes: {nodes}, Pods: {nodes}, Chunksize: {workers}, Worker Processes: {workers}"
