@@ -141,8 +141,8 @@ class OpenNebulaBackend:
         max_workers = int(self.one_config['max_workers']) * granularity
 
         if current_workers < functions and current_workers < max_workers and self.one_config["autoscale"] in {"all", "up"}:
-            self._scale_one(current_workers // granularity, max_workers // granularity)
-            current_workers = max_workers
+            self._scale_one(current_workers // granularity, functions // granularity)
+            current_workers = functions // granularity 
 
         granularity = current_workers
         times, res = divmod(functions, granularity)
@@ -177,20 +177,37 @@ class OpenNebulaBackend:
 
     def _get_nodes(self) -> int:
         for role in self.client.get("service").get("SERVICE", {}).get("roles", []):
-            if "lithops_worker" in role.get("name", "").lower():
+            if "worker" in role.get("name", "").lower():
                 return int(role.get("cardinality"))
 
         return 0
 
-    def _scale_one(self, nodes: int, scale_nodes: int) -> None:
+    def _scale_one(self, nodes: int, scale_nodes: int, timeout: int = 300, interval: int = 5) -> None:
+
+      start_time = time.time()
+      while True:
         service = self.client.get("service").get("SERVICE", {})
-        if service.get("state") != ServiceState.RUNNING.value:
-            logger.info(
-                    "Service is not in 'RUNNING' state and can not be scaled"
-            )
+        state = service.get("state")
+
+        if state == ServiceState.RUNNING.value:
+            break
+
+        if time.time() - start_time > timeout:
+            logger.warning("Timeout waiting for service to reach 'RUNNING' state")
             return
-        logger.info(f"Scaling workers from {nodes} to {scale_nodes} nodes")
-        self.client.scale(scale_nodes, "lithops_worker")
+
+        logger.info(f"Service state is '{state}', waiting for 'RUNNING'...")
+        time.sleep(interval)
+
+      logger.info(f"Scaling workers from {nodes} to {scale_nodes} nodes")
+      self.client.scale(scale_nodes, "worker")
+
+      while True:
+        service = self.client.get("service").get("SERVICE", {})
+        state = service.get("state")
+
+        if state == ServiceState.RUNNING.value or state == ServiceState.COOLDOWN.value:
+            break
 
     def _generate_runtime_meta(self, one_image_name):
         runtime_name = self._format_job_name(one_image_name, 128)
